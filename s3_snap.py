@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 import boto3
 import Queue
 import threading

@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import argparse
 
 import s3_snap
@@ -19,6 +21,8 @@ def main():
     init()
 
     parser = argparse.ArgumentParser()
+
+    # Global common args
     parser.add_argument(
         '--access_key', dest='access_key', required=True, help='AWS access key')
     parser.add_argument(
@@ -31,6 +35,8 @@ def main():
         help='File name to store the meta data collected')
 
     subparsers = parser.add_subparsers(dest="cmd")
+
+    # S3 specific, TODO: refactor out
     s3parser = subparsers.add_parser('s3')
     s3parser.add_argument(
         '--bucket_name', dest='bucket_name', required=True,
@@ -39,6 +45,7 @@ def main():
         '--prefix', dest='prefix', default='',
         help='S3 bucket prefix like AWSLogs/')
 
+    # CloudWatch specific, TODO: refactor out
     cloudwatch_parser = subparsers.add_parser('cloudwatch')
     cloudwatch_parser.add_argument(
         '--namespace', dest='namespace', required=True,
