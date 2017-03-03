@@ -23,59 +23,74 @@ class S3Snapper(object):
             self.ctx.region, self.bucket_name, self.prefix)
 
     def snap(self):
-        logging.info(
+        logging.warn(
             'Start collecting meta data for %s', self.common_log)
 
         start = time.time()
         try:
-            self._do_snap()
+            num_keys = self._do_snap()
         except Exception:
             logging.error(
                 'Failed to collect meta data for %s error=%s',
                 self.common_log, traceback.format_exc())
-
-        logging.info(
-            'End of collecting meta data for %s took=%s seconds',
-            self.common_log, time.time() - start)
+        else:
+            logging.warn(
+                'End of collecting meta data for %s discoverd=%d took=%s seconds',
+                self.common_log, num_keys, time.time() - start)
 
     def _do_snap(self):
         # Discover
         prefixes = self._discover_prefixes()
-        logging.info(
+        logging.warn(
             'Discovered %s with count=%d sub-prefixes:\n %s',
             self.common_log, len(prefixes), '\n'.join(prefixes))
 
         # Collect
         workers = []
         results_q = Queue.Queue(10000)
+        task_q = Queue.Queue()
         for prefix in prefixes:
+            task_q.put(prefix)
+
+        for i in xrange(self.ctx.concurrency):
+            task_q.put(None)
             worker = threading.Thread(
-                target=self._collect_key_metas, args=(prefix, results_q))
+                target=self._collect_key_metas, args=(task_q, results_q))
             worker.start()
             workers.append(worker)
 
         # Index
         worker_done = 0
+        num_keys = 0
         with self.ctx.eventwriter as writer:
             while 1:
                 key_metas = results_q.get()
                 if key_metas is not None:
                     key_metas = postprocess_keys(key_metas)
+                    num_keys += len(key_metas)
                     writer.write(key_metas)
                 else:
                     worker_done += 1
-                    if worker_done == len(workers):
+                    if worker_done == self.ctx.concurrency:
                         break
 
         for worker in workers:
             worker.join()
 
-    def _collect_key_metas(self, prefix, result_q):
-        try:
-            self._do_collect(prefix, result_q)
-        except Exception:
-            logging.info('Failed to handle %s error=%s',
-                         self.common_log, traceback.format_exc())
+        return num_keys
+
+    def _collect_key_metas(self, task_q, result_q):
+        while 1:
+            prefix = task_q.get()
+            if prefix is None:
+                task_q.put(None)
+                break
+
+            try:
+                self._do_collect(prefix, result_q)
+            except Exception:
+                logging.warn('Failed to handle %s error=%s',
+                             self.common_log, traceback.format_exc())
 
         result_q.put(None)
 
@@ -94,18 +109,21 @@ class S3Snapper(object):
         }
 
         start_time = time.time()
+        num_keys = 0
         while 1:
             response = client.list_objects_v2(**params)
             next_token = response.get('NextContinuationToken')
-            if not next_token or not response.get('Contents'):
-                logging.info(
-                    'Done with region=%s bucket_name=%s prefix=%s took=%s seconds',
-                    self.ctx.region, self.bucket_name, prefix,
-                    time.time() - start_time)
-                break
-
             if response.get('Contents'):
+                num_keys += len(response['Contents'])
                 result_q.put(response['Contents'])
+
+            if not next_token or not response.get('Contents'):
+                logging.warn(
+                    'Done with region=%s bucket_name=%s prefix=%s discoverd=%d '
+                    'took=%s seconds',
+                    self.ctx.region, self.bucket_name, prefix,
+                    num_keys, time.time() - start_time)
+                break
 
             if next_token:
                 params['ContinuationToken'] = next_token
@@ -117,21 +135,38 @@ class S3Snapper(object):
             aws_secret_access_key=self.ctx.secret_key,
         )
 
-        prefix = self.prefix
+        all_discovered = []
+        prefixes = [self.prefix]
+        num_iteration = 0
         while 1:
-            response = client.list_objects_v2(
-                Bucket=self.bucket_name,
-                Delimiter='/',
-                MaxKeys=1000,
-                Prefix=prefix,
-                FetchOwner=False,
-            )
+            num_iteration += 1
+            for prefix in prefixes:
+                response = client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Delimiter='/',
+                    MaxKeys=1000,
+                    Prefix=prefix,
+                    FetchOwner=True,
+                )
 
-            common_prefixes = response.get('CommonPrefixes')
-            if common_prefixes is None:
-                return [prefix]
+                common_prefixes = response.get('CommonPrefixes')
+                if common_prefixes is None:
+                    all_discovered.append(prefix)
+                    continue
 
-            if len(common_prefixes) == 1:
-                prefix = common_prefixes[0]['Prefix']
+                all_discovered.extend([p['Prefix'] for p in common_prefixes])
+
+            if len(prefixes) != 1 and len(prefixes) == len(all_discovered):
+                # No new prefixed discovered
+                break
+
+            if len(all_discovered) > 100 or num_iteration > 5:
+                break
             else:
-                return [p['Prefix'] for p in common_prefixes]
+                prefixes = all_discovered
+                all_discovered = []
+
+        if all_discovered:
+            return all_discovered
+        else:
+            return prefixes

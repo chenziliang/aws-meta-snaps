@@ -74,20 +74,21 @@ class CloudWatchSnap(object):
             self.ctx.region, self.namespace, self.metric_names)
 
     def snap(self):
-        logging.info(
+        logging.warn(
             'Start collecting meta data for %s', self.common_log)
 
         start = time.time()
         try:
-            self._do_snap()
+            metric_num = self._do_snap()
         except Exception:
             logging.error(
                 'Failed to collect meta data for %s error=%s',
                 self.common_log, traceback.format_exc())
-
-        logging.info(
-            'End of collecting meta data for %s took=%s seconds',
-            self.common_log, time.time() - start)
+        else:
+            logging.warn(
+                'End of collecting meta data for %s discoverd=%d '
+                'took=%s seconds',
+                self.common_log, metric_num, time.time() - start)
 
     def _do_snap(self):
         # Collect
@@ -101,10 +102,12 @@ class CloudWatchSnap(object):
 
         # Index
         worker_done = 0
+        metric_num = 0
         with self.ctx.eventwriter as writer:
             while 1:
                 dim_metrics = results_q.get()
                 if dim_metrics is not None:
+                    metric_num += len(dim_metrics)
                     writer.write(dim_metrics)
                 else:
                     worker_done += 1
@@ -114,10 +117,14 @@ class CloudWatchSnap(object):
         for worker in workers:
             worker.join()
 
+        return metric_num
+
     def _collect_metric_meta(self, metric_name, results_q):
+        start = time.time()
+
         try:
             metrics = self._list_metrics_by_metric_name(metric_name)
-            if os.environ.get('cloudwatch_filter'):
+            if os.environ.get('cloudwatch_filter') in ('1', 'true', 'yes'):
                 metrics = self._filter_invalid_dimensions(metrics)
             results_q.put(metrics)
         except Exception:
@@ -126,6 +133,13 @@ class CloudWatchSnap(object):
                        self.ctx.region, self.namespace, metric_name,
                        traceback.format_exc())
             logging.error(msg)
+        else:
+            logging.warn(
+                'List metric for region=%s namespace=%s metric_name=%s, '
+                'discovered=%s took=%s',
+                self.ctx.region, self.namespace, metric_name, len(metrics),
+                time.time() - start)
+
         results_q.put(None)
 
     def _list_metrics_by_metric_name(self, metric_name):
@@ -230,8 +244,8 @@ class CloudWatchSnap(object):
             else:
                 removed.append(m)
 
-        if logging.root.isEnabledFor(logging.INFO):
-            logging.info(
+        if logging.root.isEnabledFor(logging.warn):
+            logging.warn(
                 '%s total=%d, valid=%d, filtered=%d',
                 self.common_log, len(metrics), len(new_metrics),
                 len(metrics) - len(new_metrics))
@@ -241,7 +255,7 @@ class CloudWatchSnap(object):
                 filtered_ids = ','.join(d['Value'] for m in removed[i: i + 100]
                                         for d in m['Dimensions'])
                 if filtered_ids:
-                    logging.info('filtered_ids=%s', filtered_ids)
+                    logging.warn('filtered_ids=%s', filtered_ids)
 
                 if i >= total:
                     break

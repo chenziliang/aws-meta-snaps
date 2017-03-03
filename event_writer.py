@@ -1,7 +1,7 @@
 import json
 
 
-class CsvEventWriter(object):
+class JsonEventWriter(object):
 
     def __init__(self, fname, mode='a'):
         self.fname = fname

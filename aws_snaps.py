@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import argparse
+import logging
 
 import s3_snap
 import cloudwatch_snap
@@ -18,6 +19,7 @@ def init():
 
 
 def main():
+    logging.basicConfig(level=logging.WARNING)
     init()
 
     parser = argparse.ArgumentParser()
@@ -31,8 +33,10 @@ def main():
         '--region', dest='region', required=True, help='AWS region')
     parser.add_argument(
         '--target_file', dest='fname', required=True,
-        default='aws_s3_keys.csv',
         help='File name to store the meta data collected')
+    parser.add_argument(
+        '--concurrency', dest='concurrency', required=False,
+        type=int, default=16, help='number of threads')
 
     subparsers = parser.add_subparsers(dest="cmd")
 
@@ -59,9 +63,10 @@ def main():
 
     args = parser.parse_args()
 
-    writer = ew.CsvEventWriter(args.fname)
+    writer = ew.JsonEventWriter(args.fname)
     context = ctx.AWSContext(
-        writer, args.access_key, args.secret_key, args.region)
+        writer, args.access_key, args.secret_key,
+        args.region, args.concurrency)
 
     if args.cmd == 's3':
         snapper = s3_snap.S3Snapper(context, args.bucket_name, args.prefix)
