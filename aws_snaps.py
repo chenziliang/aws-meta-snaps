@@ -3,8 +3,7 @@
 import argparse
 import logging
 
-import s3_snap
-import cloudwatch_snap
+import snaps
 import aws_context as ctx
 import event_writer as ew
 import boto3
@@ -39,27 +38,8 @@ def main():
         type=int, default=16, help='number of threads')
 
     subparsers = parser.add_subparsers(dest="cmd")
-
-    # S3 specific, TODO: refactor out
-    s3parser = subparsers.add_parser('s3')
-    s3parser.add_argument(
-        '--bucket_name', dest='bucket_name', required=True,
-        help='S3 bucket name')
-    s3parser.add_argument(
-        '--prefix', dest='prefix', default='',
-        help='S3 bucket prefix like AWSLogs/')
-
-    # CloudWatch specific, TODO: refactor out
-    cloudwatch_parser = subparsers.add_parser('cloudwatch')
-    cloudwatch_parser.add_argument(
-        '--namespace', dest='namespace', required=True,
-        help='CloudWatch namespace like AWS/EC2')
-    cloudwatch_parser.add_argument(
-        '--metrics', dest='metrics', default='',
-        help='CloudWatch metrics like CPUCreditBalance,CPUCreditUsage')
-    cloudwatch_parser.add_argument(
-        '--dimension_filter', dest='dim_filter_rex', default='',
-        help='CloudWatch dimension filter')
+    for mod in snaps.__all__:
+        mod.add_params(subparsers)
 
     args = parser.parse_args()
 
@@ -68,13 +48,12 @@ def main():
         writer, args.access_key, args.secret_key,
         args.region, args.concurrency)
 
-    if args.cmd == 's3':
-        snapper = s3_snap.S3Snapper(context, args.bucket_name, args.prefix)
-    elif args.cmd == 'cloudwatch':
-        snapper = cloudwatch_snap.CloudWatchSnap(
-            context, args.namespace, args.metrics, args.dim_filter_rex)
-    else:
-        assert 0
+    snap_map = {
+        's3': snaps.s3_snap.new_snapper,
+        'cloudwatch': snaps.cloudwatch_snap.new_snapper,
+    }
+
+    snapper = snap_map[args.cmd](context, args)
     snapper.snap()
 
 

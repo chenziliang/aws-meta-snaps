@@ -300,3 +300,21 @@ class CloudWatchSnap(object):
             return cloudwatch_defaults.CLOUDWATCH_DEFAULT_METRICS[self.namespace]
         else:
             return [metric.strip() for metric in metric_names.split(',')]
+
+
+def add_params(subparsers):
+    cloudwatch_parser = subparsers.add_parser('cloudwatch')
+    cloudwatch_parser.add_argument(
+        '--namespace', dest='namespace', required=True,
+        help='CloudWatch namespace like AWS/EC2')
+    cloudwatch_parser.add_argument(
+        '--metrics', dest='metrics', default='',
+        help='CloudWatch metrics like CPUCreditBalance,CPUCreditUsage')
+    cloudwatch_parser.add_argument(
+        '--dimension_filter', dest='dim_filter_rex', default='',
+        help='CloudWatch dimension filter')
+
+
+def new_snapper(awscontext, args):
+    return CloudWatchSnap(
+        awscontext, args.namespace, args.metrics, args.dim_filter_rex)

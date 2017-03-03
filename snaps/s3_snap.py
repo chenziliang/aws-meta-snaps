@@ -170,3 +170,17 @@ class S3Snapper(object):
             return all_discovered
         else:
             return prefixes
+
+
+def add_params(subparsers):
+    s3parser = subparsers.add_parser('s3')
+    s3parser.add_argument(
+        '--bucket_name', dest='bucket_name', required=True,
+        help='S3 bucket name')
+    s3parser.add_argument(
+        '--prefix', dest='prefix', default='',
+        help='S3 bucket prefix like AWSLogs/')
+
+
+def new_snapper(awscontext, args):
+    return S3Snapper(awscontext, args.bucket_name, args.prefix)
