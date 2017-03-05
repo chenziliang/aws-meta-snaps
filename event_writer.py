@@ -3,7 +3,7 @@ import json
 
 class JsonEventWriter(object):
 
-    def __init__(self, fname, mode='a'):
+    def __init__(self, fname, mode='w'):
         self.fname = fname
         self.mode = mode
         self.opened_file = None
